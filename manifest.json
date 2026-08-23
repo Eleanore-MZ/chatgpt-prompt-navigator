@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Prompt Navigator",
+  "version": "0.1.0",
+  "description": "A small personal navigation rail for user prompts in the current ChatGPT conversation.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "src/chatgpt/selectors.js",
+        "src/data/conversation-data-source.js",
+        "src/data/dom-conversation-data-source.js",
+        "src/navigation/navigation-controller.js",
+        "src/ui/navigation-rail.js",
+        "src/chatgpt/route-observer.js",
+        "src/content.js"
+      ],
+      "css": ["src/styles.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

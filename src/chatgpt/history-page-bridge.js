@@ -3,7 +3,6 @@
 (function () {
   const REQUEST = 'CPN_HISTORY_REQUEST';
   const RESPONSE = 'CPN_HISTORY_RESPONSE';
-  let discoveredUrl = null;
 
   function validId(value) {
     return typeof value === 'string' && value.length > 0 && value.length < 200;
@@ -27,8 +26,8 @@
     return found;
   }
 
-  function isUsableHistoryUrl(url) {
-    return url.searchParams.has('before') && url.searchParams.has('include_has_versions') && url.searchParams.has('num_turns');
+  function isMessagesPath(pathname) {
+    return /(^|\/)messages(?:$|[/?])/i.test(pathname);
   }
 
   function reply(requestId, payload) {
@@ -45,48 +44,56 @@
       return;
     }
 
-    if (data.action === 'discover') {
+    if (data.action === 'discover' || data.action === 'inspect-resources') {
       const candidates = findObservedUrls();
-      const url = candidates.find(isUsableHistoryUrl) || null;
-      discoveredUrl = url;
-      reply(data.requestId, {
-        ok: Boolean(url),
-        url: url ? describe(url) : null,
-        candidates: candidates.map(describe),
-        errorCode: url ? null : 'NO_HISTORY_ENDPOINT',
-        error: url ? null : 'No observed history endpoint was found in Resource Timing entries.',
-      });
+      reply(data.requestId, { ok: true, candidates: candidates.map(describe) });
       return;
     }
 
-    if (data.action !== 'fetch-page' || !validId(data.before)) return;
-    const base = discoveredUrl || findObservedUrls().find(isUsableHistoryUrl);
-    if (!base || base.origin !== location.origin) {
-      reply(data.requestId, { ok: false, errorCode: 'NO_HISTORY_ENDPOINT', error: 'No observed same-origin history request is available.' });
+    if ((data.action === 'fetch-initial' || data.action === 'fetch-page') && data.endpoint) {
+      const endpoint = data.endpoint;
+      if (typeof endpoint.pathname !== 'string' || !isMessagesPath(endpoint.pathname)) {
+        reply(data.requestId, { ok: false, errorCode: 'ENDPOINT_INVALID', error: 'Constructed endpoint is not a messages path.' });
+        return;
+      }
+      let url;
+      try {
+        url = new URL(endpoint.pathname + (endpoint.search || ''), location.origin);
+      } catch (_) {
+        reply(data.requestId, { ok: false, errorCode: 'ENDPOINT_INVALID', error: 'Constructed endpoint URL is invalid.' });
+        return;
+      }
+      if (data.action === 'fetch-page') {
+        if (typeof data.before !== 'string' || !data.before) {
+          reply(data.requestId, { ok: false, errorCode: 'BOOTSTRAP_CURSOR_UNAVAILABLE', error: 'A before cursor is required for a history page.' });
+          return;
+        }
+        url.searchParams.set('before', data.before);
+      } else {
+        url.searchParams.delete('before');
+      }
+      url.searchParams.set('include_has_versions', 'true');
+      url.searchParams.set('num_turns', '10');
+      try {
+        const response = await fetch(url.href, { credentials: 'include', headers: { Accept: 'application/json' } });
+        if (!response.ok) {
+          reply(data.requestId, { ok: false, errorCode: data.action === 'fetch-initial' ? 'INITIAL_PAGE_HTTP_ERROR' : 'HISTORY_HTTP_ERROR', error: `History request returned HTTP ${response.status}.` });
+          return;
+        }
+        let body;
+        try { body = await response.json(); } catch (_) {
+          reply(data.requestId, { ok: false, errorCode: data.action === 'fetch-initial' ? 'INITIAL_PAGE_INVALID_JSON' : 'HISTORY_INVALID_JSON', error: 'History response was not valid JSON.' });
+          return;
+        }
+        if (!body || !Array.isArray(body.messages) || !body.page_info) {
+          reply(data.requestId, { ok: false, errorCode: data.action === 'fetch-initial' ? 'INITIAL_PAGE_INVALID_SHAPE' : 'HISTORY_INVALID_SHAPE', error: 'History response did not contain the expected messages/page_info shape.' });
+          return;
+        }
+        reply(data.requestId, { ok: true, page: body });
+      } catch (error) {
+        reply(data.requestId, { ok: false, errorCode: data.action === 'fetch-initial' ? 'INITIAL_PAGE_FETCH_ERROR' : 'HISTORY_FETCH_ERROR', error: error instanceof Error ? error.message : 'History request failed.' });
+      }
       return;
-    }
-    const url = new URL(base.href);
-    url.searchParams.set('before', data.before);
-    url.searchParams.set('include_has_versions', 'true');
-    url.searchParams.set('num_turns', '10');
-    try {
-      const response = await fetch(url.href, { credentials: 'include', headers: { Accept: 'application/json' } });
-      if (!response.ok) {
-        reply(data.requestId, { ok: false, errorCode: 'HISTORY_HTTP_ERROR', error: `History request returned HTTP ${response.status}.` });
-        return;
-      }
-      let body;
-      try { body = await response.json(); } catch (_) {
-        reply(data.requestId, { ok: false, errorCode: 'HISTORY_INVALID_JSON', error: 'History response was not valid JSON.' });
-        return;
-      }
-      if (!body || !Array.isArray(body.messages) || !body.page_info) {
-        reply(data.requestId, { ok: false, errorCode: 'HISTORY_INVALID_SHAPE', error: 'History response did not contain the expected messages/page_info shape.' });
-        return;
-      }
-      reply(data.requestId, { ok: true, page: body });
-    } catch (error) {
-      reply(data.requestId, { ok: false, errorCode: 'HISTORY_FETCH_ERROR', error: error instanceof Error ? error.message : 'History request failed.' });
     }
   });
   document.documentElement?.setAttribute('data-cpn-history-bridge-ready', 'true');

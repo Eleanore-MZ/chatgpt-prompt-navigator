@@ -7,7 +7,6 @@ CPN.NavigationRail = class NavigationRail {
     this.root.querySelector('.cpn-toggle').addEventListener('click', () => this.root.classList.toggle('cpn-collapsed'));
     document.documentElement.append(this.root);
   }
-
   render(prompts, status, conversationId) {
     const list = this.root.querySelector('.cpn-list');
     const existing = new Map([...list.children].map(node => [node.dataset.promptId, node]));
@@ -25,9 +24,10 @@ CPN.NavigationRail = class NavigationRail {
     const error = status.error ? ` - ${status.error}` : '';
     this.root.querySelector('.cpn-status').textContent = `Data source: ${status.name} | Stage: ${status.stage || 'unknown'} | Prompts indexed: ${prompts.length} | DOM mounted: ${mounted} | History complete: ${phase} | Pages: ${status.pagesFetched || 0}${error}`;
     const details = status.details || {};
-    const candidates = (details.candidates || []).map(candidate => `${candidate.pathname}${candidate.search || ''}`).join(' ; ') || 'none observed';
+    const candidates = (details.candidates || []).map(candidate => `${candidate.pathname}${candidate.search || ''}`).join(' ; ') || 'none';
+    const constructed = details.constructed ? `${details.constructed.pathname}${details.constructed.search || ''}` : 'none';
     const ids = (details.mountedMessageIds || []).join(', ') || 'none';
-    this.root.querySelector('.cpn-debug').textContent = `URL: ${location.href} | Conversation: ${conversationId || 'none'} | Mounted IDs: ${ids} | Candidate history URLs: ${candidates}`;
+    this.root.querySelector('.cpn-debug').textContent = `URL: ${location.href} | Conversation: ${conversationId || 'none'} | Mounted IDs: ${ids} | Observed history endpoint: ${candidates} | Constructed history endpoint: ${constructed} | Match: ${details.match || 'unknown'}`;
   }
   destroy() { this.root.remove(); }
 };

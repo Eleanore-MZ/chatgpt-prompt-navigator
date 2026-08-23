@@ -20,6 +20,7 @@
       ],
       "js": [
         "src/chatgpt/selectors.js",
+        "src/chatgpt/history-endpoint.js",
         "src/data/conversation-data-source.js",
         "src/data/dom-conversation-data-source.js",
         "src/data/history-conversation-data-source.js",

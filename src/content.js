@@ -96,24 +96,36 @@ async function startHistoryLoad(generation) {
     await bridgeRequest('init');
     history.setDiagnostic('bridge-ready', 'MAIN-world bridge initialized.');
     refresh('bridge ready');
-    const discovered = await bridgeRequest('discover');
+    const observed = await bridgeRequest('inspect-resources');
     if (generation !== historyLoadGeneration) return;
-    history.setDiagnostic('endpoint-discovered', 'History endpoint discovered from Resource Timing.', {
-      candidates: discovered.candidates || [],
-    });
-    const boundary = mounted.find(prompt => !prompt.messageId.startsWith('dom-element-'))?.messageId;
-    if (!boundary) {
-      history.fail('bootstrap-cursor-unavailable', 'No stable mounted message ID is available as the first before cursor.', {
-        mountedMessageIds: domDiagnostics.mountedMessageIds,
-      });
-      dataSource = domSource; domSource.failure = history.getStatus().error; refresh('cursor unavailable');
+    const endpoint = CPN.historyEndpoint.buildHistoryEndpoint({ conversationId: currentConversationId });
+    const match = CPN.historyEndpoint.compareObserved(endpoint, observed.candidates || []);
+    const resolutionDetails = {
+      url: location.href,
+      conversationId: currentConversationId,
+      constructed: endpoint,
+      candidates: observed.candidates || [],
+      match,
+      mountedMessageIds: domDiagnostics.mountedMessageIds,
+    };
+    if (!endpoint) {
+      history.fail('endpoint-unconfigured', 'The current history endpoint is not configured; no route is guessed.', resolutionDetails);
+      domSource.failure = 'endpoint-unconfigured: current history endpoint is not configured.';
+      domSource.failureDetails = resolutionDetails;
+      dataSource = domSource; refresh('endpoint unconfigured');
       return;
     }
-    history.setDiagnostic('fetching-history', `Fetching history before mounted message ${boundary}.`, { boundary });
-    refresh('history fetch');
-    const loaded = await history.load(boundary, () => { if (generation === historyLoadGeneration) refresh('history update'); });
+    history.setDiagnostic('endpoint-resolved', 'History endpoint constructed from the current conversation ID.', {
+      ...resolutionDetails,
+    });
+    refresh('endpoint resolved');
+    const loaded = await history.loadInitial(
+      async () => (await bridgeRequest('fetch-initial', { endpoint })).page,
+      () => { if (generation === historyLoadGeneration) refresh('history update'); },
+    );
     if (!loaded && generation === historyLoadGeneration) {
       domSource.failure = history.getStatus().error || 'History API unavailable.';
+      domSource.failureDetails = { stage: history.getStatus().stage, ...(history.getStatus().details || {}), url: location.href, conversationId: currentConversationId, mountedMessageIds: domDiagnostics.mountedMessageIds };
       dataSource = domSource; refresh('history fallback');
     }
   } catch (error) {

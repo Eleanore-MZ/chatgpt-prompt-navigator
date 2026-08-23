@@ -16,14 +16,23 @@ The supplied capture showed the first and last message IDs matching `start_curso
 
 ## Exact request path
 
-The full pathname was not included in the supplied evidence, and no authenticated browser session was available to this development environment. The extension therefore does not guess a route copied from an older project. The MAIN-world bridge discovers the actual current same-origin resource URL from the page's Resource Timing entries, requiring the observed `before`, `include_has_versions`, and `num_turns` query parameters and a `messages` pathname. It then changes only the `before` cursor for subsequent requests.
+The exact current endpoint has now been experimentally verified in an authenticated ChatGPT session:
+
+```text
+/c/<conversationId>
+        |
+        v
+/backend-api/conversations/<conversationId>/messages
+```
+
+`src/chatgpt/history-endpoint.js` is the sole endpoint-construction module and now uses `/backend-api/conversations/{conversationId}/messages`. Resource Timing is queried only to display observed candidates and compare them with the constructed descriptor; it does not control whether history bootstrap starts.
 
 When testing locally, DevTools Network should be used to record the actual current pathname (without cookies, authorization headers, or response secrets) and compare it with the bridge's discovered URL. The conversation ID is expected to be encoded in that observed request's path or query, but this repository does not assume which one until the page supplies the URL.
 
 ## Current implementation
 
 - `HistoryConversationDataSource` is the canonical source once the observed request is discoverable.
-- It starts from the oldest stable message ID currently present in the DOM, fetches pages with `before=<cursor>`, and advances to `page_info.start_cursor` while `has_previous_page` is true.
+- Once the endpoint module is configured, it first requests the endpoint without `before`, validates that newest page, uses its `start_cursor` as the first backward cursor, and advances to `page_info.start_cursor` while `has_previous_page` is true.
 - It validates non-empty pages, required pagination fields, cursor/message endpoint alignment, repeated cursors, duplicate message IDs, and route-generation cancellation.
 - It sorts normalized prompts oldest-to-newest by `create_time`, with insertion order as the implicit tie-breaker.
 - It retains only `messageId`, text, role, timestamp/createdAt, index, and a temporary current `domElement` reference. DOM element identity is never used as canonical identity.
@@ -43,7 +52,7 @@ Complete enumeration (knowing every prompt exists) is now separate from renderin
 
 ## Testing result for this environment
 
-No authenticated session was available here, so the number of pages/prompts retrieved is currently **not measured**. The extension can report pages and prompt counts in its rail once loaded in the user's browser. Full-history indexing without manually scrolling is expected when the current page has already made an observable history request and the supplied pagination semantics hold; that claim still needs live confirmation.
+No authenticated session was available here, so the number of pages/prompts retrieved is currently **not measured**. The endpoint is now configured for fresh-load bootstrap; the user's browser will report either `history-complete` or a precise `initial-page-*` failure in the rail and console. Full-history indexing without manually scrolling still requires that live test.
 
 ## Bootstrap diagnostics
 
@@ -52,9 +61,13 @@ The fresh-load bootstrap now reports a stage rather than collapsing errors into 
 - `main-world-injection-failed`: no bridge-ready marker or response was observed, so the MAIN-world content script may not have injected.
 - `bridge-communication-failed`: the bridge marker exists but the isolated-world request timed out.
 - `no-history-endpoint`: the bridge initialized, but no same-origin Resource Timing candidate matching the observed query shape was found. This is the expected diagnostic when ChatGPT has not yet made its older-history request; it is not silently treated as complete history.
+- `endpoint-unconfigured`: configuration is missing or the current route has no parsed conversation ID.
+- `endpoint-resolution`: the rail shows the parsed conversation ID, constructed endpoint, observed candidates, and `Match: yes/no/unknown`.
+- `initial-page-fetching` / `initial-page-valid`: the independent no-`before` bootstrap request is in progress or validated.
+- `initial-page-http-error` / `initial-page-invalid-shape`: the independent bootstrap request failed at HTTP or response validation.
 - `bootstrap-cursor-unavailable`: no stable `data-message-id` was available among mounted user messages.
 - `history-fetch-http-error`: the observed endpoint returned a non-2xx response.
 - `history-response-invalid-shape`: the response was not JSON or lacked the expected `messages`/`page_info` fields.
 - `pagination-failed`: cursor or page validation stopped pagination.
 
-The rail's development detail line includes the current URL, parsed conversation ID, stable mounted message IDs, and sanitized candidate history URL paths/query strings. The console also logs stage transitions and failures under `[CPN]`; prompt bodies are not logged. Resource-entry discovery is diagnostic/fallback only at this point. The exact bootstrap request path, conversation-ID placement, and first cursor still require one captured current request from the authenticated browser before an independent fresh-load bootstrap can be implemented without guessing.
+The rail's development detail line includes the current URL, parsed conversation ID, stable mounted message IDs, observed candidate URL paths/query strings, constructed endpoint, and match result. The console also logs stage transitions and failures under `[CPN]`; prompt bodies are not logged. The remaining live check is whether `GET /backend-api/conversations/{conversationId}/messages?include_has_versions=true&num_turns=10` succeeds without `before`; any failure is reported as an `initial-page-*` diagnostic rather than replaced with a guessed bootstrap method.

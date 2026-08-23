@@ -9,10 +9,20 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*"
       ],
+      "js": ["src/chatgpt/history-page-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
       "js": [
         "src/chatgpt/selectors.js",
         "src/data/conversation-data-source.js",
         "src/data/dom-conversation-data-source.js",
+        "src/data/history-conversation-data-source.js",
         "src/navigation/navigation-controller.js",
         "src/ui/navigation-rail.js",
         "src/chatgpt/route-observer.js",

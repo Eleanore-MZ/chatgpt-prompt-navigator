@@ -17,7 +17,15 @@ CPN.DomConversationDataSource = class DomConversationDataSource extends CPN.Conv
   }
 
   getStatus() {
-    return { name: 'DOM', complete: false };
+    return { name: 'DOM', complete: false, phase: 'incomplete', stage: this.failureDetails?.stage || 'dom-fallback', pagesFetched: 0, error: this.failure || null, details: this.failureDetails || {} };
+  }
+
+  getDiagnostics() {
+    const prompts = this.getPrompts();
+    return {
+      mountedCount: prompts.length,
+      mountedMessageIds: prompts.filter(prompt => !prompt.messageId.startsWith('dom-element-')).map(prompt => prompt.messageId),
+    };
   }
 
   fallbackId(element) {

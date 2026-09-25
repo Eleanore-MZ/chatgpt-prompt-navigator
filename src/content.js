@@ -79,9 +79,11 @@ async function startHistoryLoad(generation) {
   if (!rail || !dataSource) return;
   const domSource = dataSource instanceof CPN.DomConversationDataSource ? dataSource : dataSource.domSource;
   const mounted = domSource.getPrompts();
+  const endpoint = CPN.historyEndpoint.buildHistoryEndpoint({ conversationId: currentConversationId });
+  let resolutionDetails = null;
   const history = new CPN.HistoryConversationDataSource({
     domSource,
-    requestPage: async before => (await bridgeRequest('fetch-page', { before })).page,
+    requestPage: async before => (await bridgeRequest('fetch-page', { endpoint, conversationId: currentConversationId, before })).page,
   });
   dataSource = history;
   history.seedMountedPrompts(mounted);
@@ -98,9 +100,8 @@ async function startHistoryLoad(generation) {
     refresh('bridge ready');
     const observed = await bridgeRequest('inspect-resources');
     if (generation !== historyLoadGeneration) return;
-    const endpoint = CPN.historyEndpoint.buildHistoryEndpoint({ conversationId: currentConversationId });
     const match = CPN.historyEndpoint.compareObserved(endpoint, observed.candidates || []);
-    const resolutionDetails = {
+    resolutionDetails = {
       url: location.href,
       conversationId: currentConversationId,
       constructed: endpoint,
@@ -119,13 +120,18 @@ async function startHistoryLoad(generation) {
       ...resolutionDetails,
     });
     refresh('endpoint resolved');
+    history.setDiagnostic('auth-session-fetching', 'Fetching the authenticated page session.');
+    refresh('auth session fetching');
+    await bridgeRequest('auth-check');
+    history.setDiagnostic('auth-ready', 'Authenticated history session is ready.');
+    refresh('auth ready');
     const loaded = await history.loadInitial(
-      async () => (await bridgeRequest('fetch-initial', { endpoint })).page,
+      async () => (await bridgeRequest('fetch-initial', { endpoint, conversationId: currentConversationId })).page,
       () => { if (generation === historyLoadGeneration) refresh('history update'); },
     );
     if (!loaded && generation === historyLoadGeneration) {
       domSource.failure = history.getStatus().error || 'History API unavailable.';
-      domSource.failureDetails = { stage: history.getStatus().stage, ...(history.getStatus().details || {}), url: location.href, conversationId: currentConversationId, mountedMessageIds: domDiagnostics.mountedMessageIds };
+      domSource.failureDetails = { ...resolutionDetails, stage: history.getStatus().stage, ...(history.getStatus().details || {}) };
       dataSource = domSource; refresh('history fallback');
     }
   } catch (error) {
@@ -133,10 +139,13 @@ async function startHistoryLoad(generation) {
     const stage = error.code === 'NO_HISTORY_ENDPOINT' ? 'no-history-endpoint'
       : error.code === 'HISTORY_HTTP_ERROR' ? 'history-fetch-http-error'
       : error.code === 'HISTORY_INVALID_JSON' || error.code === 'HISTORY_INVALID_SHAPE' ? 'history-response-invalid-shape'
+      : error.code === 'AUTH_SESSION_HTTP_ERROR' ? 'auth-session-http-error'
+      : error.code === 'AUTH_SESSION_INVALID_SHAPE' || error.code === 'AUTH_SESSION_ERROR' ? 'auth-session-invalid-shape'
+      : error.code === 'HISTORY_HTTP_401_RETRY_FAILED' ? 'initial-page-http-error'
       : error.code === 'BRIDGE_COMMUNICATION_TIMEOUT' ? 'bridge-communication-failed'
       : error.code === 'MAIN_WORLD_INJECTION_FAILED' ? 'main-world-injection-failed'
       : 'bridge-request-failed';
-    const details = error.details?.candidates ? { candidates: error.details.candidates } : {};
+    const details = { ...(resolutionDetails || {}), ...(error.details?.candidates ? { candidates: error.details.candidates } : {}) };
     details.url = location.href;
     details.conversationId = currentConversationId;
     details.mountedMessageIds = domDiagnostics.mountedMessageIds;

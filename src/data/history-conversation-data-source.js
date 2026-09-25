@@ -21,7 +21,7 @@ CPN.HistoryConversationDataSource = class HistoryConversationDataSource extends 
 
   getStatus() { return { ...this.status }; }
 
-  setDiagnostic(stage, message, details = {}) {
+  setDiagnostic(stage, message, details = this.status.details || {}) {
     this.status = { ...this.status, phase: 'loading', stage, error: message || null, details };
     console.info('[CPN] history stage', { stage, message, ...details });
   }
@@ -111,7 +111,9 @@ CPN.HistoryConversationDataSource = class HistoryConversationDataSource extends 
       return this.paginate(cursor, generation, onUpdate);
     } catch (error) {
       const code = error.code || '';
-      const stage = code.includes('HTTP') ? 'initial-page-http-error'
+      const stage = code === 'AUTH_SESSION_HTTP_ERROR' ? 'auth-session-http-error'
+        : code === 'AUTH_SESSION_INVALID_SHAPE' ? 'auth-session-invalid-shape'
+        : code.includes('HTTP') ? 'initial-page-http-error'
         : code.includes('SHAPE') || code.includes('JSON') ? 'initial-page-invalid-shape'
         : 'initial-page-fetch-error';
       this.fail(stage, error instanceof Error ? error.message : 'Initial history page failed.');
@@ -145,7 +147,10 @@ CPN.HistoryConversationDataSource = class HistoryConversationDataSource extends 
       }
       throw new Error('Pagination stopped because a cursor repeated.');
     } catch (error) {
-      this.fail('pagination-failed', error instanceof Error ? error.message : 'History pagination failed.');
+      const stage = error.code === 'AUTH_SESSION_HTTP_ERROR' ? 'auth-session-http-error'
+        : error.code === 'AUTH_SESSION_INVALID_SHAPE' ? 'auth-session-invalid-shape'
+        : 'pagination-failed';
+      this.fail(stage, error instanceof Error ? error.message : 'History pagination failed.');
       onUpdate?.();
       return false;
     }
@@ -190,9 +195,11 @@ function validatePage(page) {
   if (!Array.isArray(page.messages) || !info || typeof info.has_previous_page !== 'boolean') {
     throw new Error('History response is missing messages or page_info.');
   }
-  if (page.messages.length === 0) throw new Error('History response returned an empty page.');
+  if ((page.rawMessageCount ?? page.messages.length) === 0) throw new Error('History response returned an empty page.');
   const firstId = page.messages[0]?.id;
   const lastId = page.messages[page.messages.length - 1]?.id;
-  if (info.start_cursor && firstId && info.start_cursor !== firstId) throw new Error('History start cursor does not match the first message.');
-  if (info.end_cursor && lastId && info.end_cursor !== lastId) throw new Error('History end cursor does not match the last message.');
+  const firstBoundaryId = page.boundary?.firstMessageId || firstId;
+  const lastBoundaryId = page.boundary?.lastMessageId || lastId;
+  if (info.start_cursor && firstBoundaryId && info.start_cursor !== firstBoundaryId) throw new Error('History start cursor does not match the first message.');
+  if (info.end_cursor && lastBoundaryId && info.end_cursor !== lastBoundaryId) throw new Error('History end cursor does not match the last message.');
 }

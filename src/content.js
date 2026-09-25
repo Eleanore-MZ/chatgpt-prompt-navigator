@@ -12,7 +12,7 @@ let historyLoadGeneration = 0;
 function refresh(reason = 'refresh') {
   if (!rail || !dataSource) return;
   const prompts = dataSource.getPrompts();
-  rail.render(prompts, dataSource.getStatus(), currentConversationId);
+  rail.render(prompts, dataSource.getStatus(), currentConversationId, navigation?.getDiagnostics());
   log(reason, { conversationId: currentConversationId, prompts: prompts.length, status: dataSource.getStatus() });
 }
 
@@ -22,7 +22,12 @@ function scheduleRefresh(reason) {
 }
 
 function resetForRoute(url) {
-  currentConversationId = CPN.getConversationId(url);
+  const nextConversationId = CPN.getConversationId(url);
+  if (nextConversationId === currentConversationId) {
+    refresh('same conversation route');
+    return;
+  }
+  currentConversationId = nextConversationId;
   historyLoadGeneration += 1;
   startHistoryLoad(historyLoadGeneration);
   log('route changed', currentConversationId);
@@ -34,11 +39,12 @@ function start() {
   if (document.getElementById('cpn-navigation-rail')) return;
   const domSource = new CPN.DomConversationDataSource();
   dataSource = domSource;
+  currentConversationId = CPN.getConversationId();
   navigation = new CPN.NavigationController({
-    onAttempt: prompt => log('navigation attempt', prompt.messageId),
+    getConversationId: () => currentConversationId,
+    onAttempt: diagnostic => { log('navigation attempt', diagnostic); refresh('navigation attempt'); },
   });
   rail = new CPN.NavigationRail({ onSelect: prompt => navigation.goToPrompt(prompt) });
-  currentConversationId = CPN.getConversationId();
   mutationObserver = new MutationObserver(() => scheduleRefresh('DOM mutation'));
   mutationObserver.observe(document.body, { childList: true, subtree: true });
   CPN.observeRoute(resetForRoute);
